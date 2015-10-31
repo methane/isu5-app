@@ -52,9 +52,26 @@ type Data struct {
 
 var saltChars = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
 
-func getSession(w http.ResponseWriter, r *http.Request) *sessions.Session {
-	session, _ := store.Get(r, "isucon5q-go.session")
-	return session
+func getSession(w http.ResponseWriter, r *http.Request) int {
+
+	for _, c := range r.Cookies() {
+		if c.Name == "user_id" {
+			i, err := strconv.Atoi(c.Value)
+			if err != nil {
+				return 0
+			}
+			return i
+		}
+	}
+	return 0
+}
+
+func setSession(w http.ResponseWriter, userID int) {
+	cookie := http.Cookie{
+		Name:  "user_id",
+		Value: fmt.Sprintf("%d", userID),
+	}
+	http.SetCookie(w, &cookie)
 }
 
 func getTemplatePath(file string) string {
@@ -78,9 +95,7 @@ func authenticate(w http.ResponseWriter, r *http.Request, email, passwd string) 
 		}
 		checkErr(err)
 	}
-	session := getSession(w, r)
-	session.Values["user_id"] = user.ID
-	session.Save(r, w)
+	setSession(w, user.ID)
 	return &user
 }
 
@@ -90,9 +105,8 @@ func getCurrentUser(w http.ResponseWriter, r *http.Request) *User {
 		user := u.(User)
 		return &user
 	}
-	session := getSession(w, r)
-	userID, ok := session.Values["user_id"]
-	if !ok || userID == nil {
+	userID := getSession(w, r)
+	if userID != 0 {
 		return nil
 	}
 	row := db.QueryRow(`SELECT id,email,grade FROM users WHERE id=$1`, userID)
@@ -116,9 +130,7 @@ func generateSalt() string {
 }
 
 func clearSession(w http.ResponseWriter, r *http.Request) {
-	session := getSession(w, r)
-	delete(session.Values, "user_id")
-	session.Save(r, w)
+	setSession(w, 0)
 }
 
 func GetSignUp(w http.ResponseWriter, r *http.Request) {

@@ -96,6 +96,7 @@ func authenticate(w http.ResponseWriter, r *http.Request, email, passwd string) 
 		checkErr(err)
 	}
 	setSession(w, user.ID)
+	context.Set(r, "user", user)
 	return &user
 }
 

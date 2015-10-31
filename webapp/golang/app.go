@@ -427,7 +427,7 @@ func GetData(w http.ResponseWriter, r *http.Request) {
 	var arg Arg
 	checkErr(json.Unmarshal([]byte(argJson), &arg))
 
-	data := make([]string, 0, len(arg))
+	data := make([]string, len(arg))
 
 	wg := sync.WaitGroup{}
 	wg.Add(len(arg))
@@ -436,28 +436,32 @@ func GetData(w http.ResponseWriter, r *http.Request) {
 	for service, conf := range arg {
 		i++
 		if service == "ken" {
-			go func(i int) {
+			go func(i int, conf *Service, service string) {
+				defer wg.Done()
 				res := fetchKen(conf.Keys[0])
 				data[i] = fmt.Sprintf(`{"service": %q, "data": %s}`, service, res)
-			}(i)
+			}(i, conf, service)
 			continue
 		}
 		if service == "ken2" {
-			go func(i int) {
+			go func(i int, conf *Service, service string) {
+				defer wg.Done()
 				res := fetchKen(conf.Params["zipcode"])
 				data[i] = fmt.Sprintf(`{"service": %q, "data": %s}`, service, res)
-			}(i)
+			}(i, conf, service)
 			continue
 		}
 		if service == "surname" || service == "givenname" {
-			go func(i int) {
+			go func(i int, conf *Service, service string) {
+				defer wg.Done()
 				res := fetchName(service, conf.Params["q"])
 				data[i] = fmt.Sprintf(`{"service": %q, "data": %s}`, service, res)
-			}(i)
+			}(i, conf, service)
 			continue
 		}
 
-		go func(i int) {
+		go func(i int, conf *Service, service string) {
+			defer wg.Done()
 			ep := Services[service]
 			headers := make(map[string]string)
 			params := conf.Params
@@ -483,7 +487,7 @@ func GetData(w http.ResponseWriter, r *http.Request) {
 			uri := fmt.Sprintf(ep.Uri, ks...)
 			res := fetchApi(ep.Meth, uri, headers, params)
 			data[i] = fmt.Sprintf(`{"service": %q, "data": %s}`, service, res)
-		}(i)
+		}(i, conf, service)
 	}
 	wg.Wait()
 

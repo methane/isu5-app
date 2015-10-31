@@ -339,6 +339,43 @@ func fetchKen(name string) string {
 	return sraw
 }
 
+func fetchName(nametype, name string) string {
+	rc := redisDB.Get()
+	{
+		res, err := rc.Do("HGET", nametype, name)
+		rc.Close()
+		if err != nil {
+			log.Println(err)
+			res = nil
+		}
+		if res != nil {
+			switch res := res.(type) {
+			case string:
+				return res
+			case []byte:
+				return string(res)
+			}
+		}
+	}
+
+	params := url.Values{}
+	params.Add("q", name)
+
+	req, err := http.NewRequest("GET", "http://api.five-final.isucon.net:8081/"+nametype, nil)
+	checkErr(err)
+	req.URL.RawQuery = params.Encode()
+
+	res, err := http.DefaultClient.Do(req)
+	checkErr(err)
+	raw, err := ioutil.ReadAll(res.Body)
+	res.Body.Close()
+
+	sraw := string(raw)
+	rc.Do("HSET", nametype, name, sraw)
+	rc.Close()
+	return sraw
+}
+
 func fetchApi(method, uri string, headers, params map[string]string) string {
 	values := url.Values{}
 	for k, v := range params {

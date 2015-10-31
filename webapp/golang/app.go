@@ -5,10 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"github.com/gorilla/context"
-	"github.com/gorilla/mux"
-	"github.com/gorilla/sessions"
-	_ "github.com/lib/pq"
 	"html/template"
 	"log"
 	"math/rand"
@@ -21,6 +17,11 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/gorilla/context"
+	"github.com/gorilla/mux"
+	"github.com/gorilla/sessions"
+	_ "github.com/lib/pq"
 )
 
 var (
@@ -413,6 +414,8 @@ func main() {
 	db.SetMaxIdleConns(128)
 	db.SetMaxOpenConns(128)
 	defer db.Close()
+
+	http.DefaultTransport.(*http.Transport).MaxIdleConnsPerHost = 100
 
 	store = sessions.NewCookieStore([]byte(ssecret))
 

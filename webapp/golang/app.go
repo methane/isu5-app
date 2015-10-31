@@ -23,15 +23,13 @@ import (
 
 	"github.com/gorilla/context"
 	"github.com/gorilla/mux"
-	"github.com/gorilla/sessions"
 	_ "github.com/lib/pq"
 )
 
 const UnixPath = "/tmp/app.sock"
 
 var (
-	db    *sql.DB
-	store *sessions.CookieStore
+	db *sql.DB
 )
 
 type User struct {
@@ -55,9 +53,26 @@ type Data struct {
 
 var saltChars = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
 
-func getSession(w http.ResponseWriter, r *http.Request) *sessions.Session {
-	session, _ := store.Get(r, "isucon5q-go.session")
-	return session
+func getSession(w http.ResponseWriter, r *http.Request) int {
+
+	for _, c := range r.Cookies() {
+		if c.Name == "user_id" {
+			i, err := strconv.Atoi(c.Value)
+			if err != nil {
+				return 0
+			}
+			return i
+		}
+	}
+	return 0
+}
+
+func setSession(w http.ResponseWriter, userID int) {
+	cookie := http.Cookie{
+		Name:  "user_id",
+		Value: fmt.Sprintf("%d", userID),
+	}
+	http.SetCookie(w, &cookie)
 }
 
 func getTemplatePath(file string) string {
@@ -81,9 +96,8 @@ func authenticate(w http.ResponseWriter, r *http.Request, email, passwd string) 
 		}
 		checkErr(err)
 	}
-	session := getSession(w, r)
-	session.Values["user_id"] = user.ID
-	session.Save(r, w)
+	setSession(w, user.ID)
+	context.Set(r, "user", user)
 	return &user
 }
 
@@ -93,9 +107,8 @@ func getCurrentUser(w http.ResponseWriter, r *http.Request) *User {
 		user := u.(User)
 		return &user
 	}
-	session := getSession(w, r)
-	userID, ok := session.Values["user_id"]
-	if !ok || userID == nil {
+	userID := getSession(w, r)
+	if userID == 0 {
 		return nil
 	}
 	row := db.QueryRow(`SELECT id,email,grade FROM users WHERE id=$1`, userID)
@@ -119,9 +132,7 @@ func generateSalt() string {
 }
 
 func clearSession(w http.ResponseWriter, r *http.Request) {
-	session := getSession(w, r)
-	delete(session.Values, "user_id")
-	session.Save(r, w)
+	setSession(w, 0)
 }
 
 func GetSignUp(w http.ResponseWriter, r *http.Request) {
@@ -404,10 +415,6 @@ func main() {
 	if dbname == "" {
 		dbname = "isucon5f"
 	}
-	ssecret := os.Getenv("ISUCON5_SESSION_SECRET")
-	if ssecret == "" {
-		ssecret = "tonymoris"
-	}
 
 	db, err = sql.Open("postgres", "host="+host+" port="+strconv.Itoa(port)+" user="+user+" dbname="+dbname+" sslmode=disable password="+password)
 	if err != nil {
@@ -419,8 +426,6 @@ func main() {
 
 	http.DefaultTransport.(*http.Transport).MaxIdleConnsPerHost = 100
 	http.DefaultTransport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
-
-	store = sessions.NewCookieStore([]byte(ssecret))
 
 	r := mux.NewRouter()
 

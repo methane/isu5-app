@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/tls"
 	"database/sql"
 	"encoding/json"
@@ -373,6 +374,15 @@ func GetData(w http.ResponseWriter, r *http.Request) {
 }
 
 func GetInitialize(w http.ResponseWriter, r *http.Request) {
+	url := os.Getenv("SLACK_URL")
+	if url != "" {
+		_, err := http.Post(url, "text/plain", bytes.NewBuffer([]byte("Start Benchmark")))
+		if err != nil {
+			log.Print(err)
+		}
+		r.Body.Close()
+	}
+
 	fname := "../sql/initialize.sql"
 	file, err := filepath.Abs(fname)
 	checkErr(err)

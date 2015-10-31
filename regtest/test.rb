@@ -30,19 +30,21 @@ end
 
 $total_time = 0.0
 
-base_url = 'http://130.211.250.13'
+isu17a = 'http://203.104.208.219'
 
 client1 = HTTPClient.new
-bench { client1.get(base_url + '/initialize') }
-bench { client1.get(base_url + '/') }
-bench { client1.post(base_url + '/login', password: 'eladio4996', email: 'eladio4996@isucon.net') }
-bench { client1.get(base_url + '/') }
-bench { client1.get(base_url + '/diary/comment/947') }
-bench { client1.get(base_url + '/friends') }
+bench { client1.get(isu17a + '/initialize') }
+bench { client1.get(isu17a + '/') }
+bench { client1.get(isu17a + '/login') }
+bench { client1.post(isu17a + '/signup', password: 'tonyny31', grade: 'micro', email: 'tony1@moris.io') }
+bench { client1.post(isu17a + '/login', password: 'tonyny31', email: 'tony1@moris.io') }
+bench { client1.get(isu17a + '/') }
+bench { client1.get(isu17a + '/data') }
+bench { client1.get(isu17a + '/modify') }
+bench { client1.post(isu17a + '/modify', service: 'ken', keys: '5460000') }
+bench { client1.post(isu17a + '/modify', param_value: '8792435', service: 'ken2', param_name: 'zipcode') }
 
 client2 = HTTPClient.new
-bench { client1.post(base_url + '/login', password: 'armand875', email: 'armand875@isucon.net') }
-bench { client1.get(base_url + '/footprints') }
 
 STDERR.puts "TOTAL: #{$total_time}[s]"
 

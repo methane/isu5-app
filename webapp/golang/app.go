@@ -106,7 +106,7 @@ func getCurrentUser(w http.ResponseWriter, r *http.Request) *User {
 		return &user
 	}
 	userID := getSession(w, r)
-	if userID != 0 {
+	if userID == 0 {
 		return nil
 	}
 	row := db.QueryRow(`SELECT id,email,grade FROM users WHERE id=$1`, userID)

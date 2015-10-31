@@ -282,13 +282,6 @@ func PostModify(w http.ResponseWriter, r *http.Request) {
 }
 
 func fetchApi(method, uri string, headers, params map[string]string) map[string]interface{} {
-	client := &http.Client{}
-	if strings.HasPrefix(uri, "https://") {
-		tr := &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		}
-		client.Transport = tr
-	}
 	values := url.Values{}
 	for k, v := range params {
 		values.Add(k, v)
@@ -311,7 +304,7 @@ func fetchApi(method, uri string, headers, params map[string]string) map[string]
 	for k, v := range headers {
 		req.Header.Add(k, v)
 	}
-	resp, err := client.Do(req)
+	resp, err := http.DefaultClient.Do(req)
 	checkErr(err)
 
 	defer resp.Body.Close()
@@ -425,6 +418,7 @@ func main() {
 	defer db.Close()
 
 	http.DefaultTransport.(*http.Transport).MaxIdleConnsPerHost = 100
+	http.DefaultTransport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 
 	store = sessions.NewCookieStore([]byte(ssecret))
 

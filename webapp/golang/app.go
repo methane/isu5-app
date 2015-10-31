@@ -498,6 +498,7 @@ func GetData(w http.ResponseWriter, r *http.Request) {
 		if !first {
 			buf.WriteByte(',')
 		}
+		first = false
 		buf.WriteString(s)
 	}
 	buf.WriteByte(']')

@@ -432,6 +432,11 @@ func GetData(w http.ResponseWriter, r *http.Request) {
 			data = append(data, fmt.Sprintf(`{"service": %q, "data": %s}`, service, res))
 			continue
 		}
+		if service == "surname" || service == "givenname" {
+			res := fetchName(service, conf.Params["q"])
+			data = append(data, fmt.Sprintf(`{"service": %q, "data": %s}`, service, res))
+			continue
+		}
 
 		ep := Services[service]
 		headers := make(map[string]string)

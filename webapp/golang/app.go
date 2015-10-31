@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"html/template"
+	"io/ioutil"
 	"log"
 	"math/rand"
 	"net"
@@ -20,7 +21,10 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/garyburd/redigo/redis"
+	"github.com/garyburd/redigo/redisx"
 	"github.com/gorilla/context"
 	"github.com/gorilla/mux"
 	_ "github.com/lib/pq"
@@ -29,8 +33,22 @@ import (
 const UnixPath = "/tmp/app.sock"
 
 var (
-	db *sql.DB
+	db      *sql.DB
+	redisDB *redisx.ConnMux
 )
+
+func initredis() {
+	for {
+		conn, err := redis.Dial("tcp", ":6379")
+		if err != nil {
+			log.Print(err)
+			time.Sleep(300 * time.Millisecond)
+			continue
+		}
+		redisDB = redisx.NewConnMux(conn)
+		return
+	}
+}
 
 type User struct {
 	ID    int
@@ -292,7 +310,73 @@ func PostModify(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/modify", http.StatusSeeOther)
 }
 
-func fetchApi(method, uri string, headers, params map[string]string) map[string]interface{} {
+func fetchKen(name string) string {
+	rc := redisDB.Get()
+	{
+		res, err := rc.Do("HGET", "ken", name)
+		rc.Close()
+		if err != nil {
+			log.Println(err)
+			res = nil
+		}
+		if res != nil {
+			switch res := res.(type) {
+			case string:
+				return res
+			case []byte:
+				return string(res)
+			}
+		}
+	}
+	res, err := http.DefaultClient.Get("http://api.five-final.isucon.net:8080/" + name)
+	checkErr(err)
+	raw, err := ioutil.ReadAll(res.Body)
+	res.Body.Close()
+
+	sraw := string(raw)
+	rc.Do("HSET", "ken", name, sraw)
+	rc.Close()
+	return sraw
+}
+
+func fetchName(nametype, name string) string {
+	rc := redisDB.Get()
+	{
+		res, err := rc.Do("HGET", nametype, name)
+		rc.Close()
+		if err != nil {
+			log.Println(err)
+			res = nil
+		}
+		if res != nil {
+			switch res := res.(type) {
+			case string:
+				return res
+			case []byte:
+				return string(res)
+			}
+		}
+	}
+
+	params := url.Values{}
+	params.Add("q", name)
+
+	req, err := http.NewRequest("GET", "http://api.five-final.isucon.net:8081/"+nametype, nil)
+	checkErr(err)
+	req.URL.RawQuery = params.Encode()
+
+	res, err := http.DefaultClient.Do(req)
+	checkErr(err)
+	raw, err := ioutil.ReadAll(res.Body)
+	res.Body.Close()
+
+	sraw := string(raw)
+	rc.Do("HSET", nametype, name, sraw)
+	rc.Close()
+	return sraw
+}
+
+func fetchApi(method, uri string, headers, params map[string]string) string {
 	values := url.Values{}
 	for k, v := range params {
 		values.Add(k, v)
@@ -318,13 +402,9 @@ func fetchApi(method, uri string, headers, params map[string]string) map[string]
 	resp, err := http.DefaultClient.Do(req)
 	checkErr(err)
 
-	defer resp.Body.Close()
-
-	var data map[string]interface{}
-	d := json.NewDecoder(resp.Body)
-	d.UseNumber()
-	checkErr(d.Decode(&data))
-	return data
+	raw, _ := ioutil.ReadAll(resp.Body)
+	resp.Body.Close()
+	return string(raw)
 }
 
 func GetData(w http.ResponseWriter, r *http.Request) {
@@ -340,10 +420,25 @@ func GetData(w http.ResponseWriter, r *http.Request) {
 	var arg Arg
 	checkErr(json.Unmarshal([]byte(argJson), &arg))
 
-	data := make([]Data, 0, len(arg))
+	data := make([]string, 0, len(arg))
 	for service, conf := range arg {
-		ep := Services[service]
+		if service == "ken" {
+			res := fetchKen(conf.Keys[0])
+			data = append(data, fmt.Sprintf(`{"service": %q, "data": %s}`, service, res))
+			continue
+		}
+		if service == "ken2" {
+			res := fetchKen(conf.Params["zipcode"])
+			data = append(data, fmt.Sprintf(`{"service": %q, "data": %s}`, service, res))
+			continue
+		}
+		if service == "surname" || service == "givenname" {
+			res := fetchName(service, conf.Params["q"])
+			data = append(data, fmt.Sprintf(`{"service": %q, "data": %s}`, service, res))
+			continue
+		}
 
+		ep := Services[service]
 		headers := make(map[string]string)
 		params := conf.Params
 		if params == nil {
@@ -367,13 +462,25 @@ func GetData(w http.ResponseWriter, r *http.Request) {
 		}
 		uri := fmt.Sprintf(ep.Uri, ks...)
 		res := fetchApi(ep.Meth, uri, headers, params)
-		data = append(data, Data{service, res})
+		//data = append(data, Data{service, res})
+		data = append(data, fmt.Sprintf(`{"service": %q, "data": %s}`, service, res))
 	}
 
+	buf := &bytes.Buffer{}
+	buf.WriteByte('[')
+	first := true
+	for _, s := range data {
+		if !first {
+			buf.WriteByte(',')
+		}
+		buf.WriteString(s)
+	}
+	buf.WriteByte(']')
+
 	w.Header().Set("Content-Type", "application/json")
-	body, err := json.Marshal(data)
-	checkErr(err)
-	w.Write(body)
+	//body, err := json.Marshal(data)
+	//checkErr(err)
+	w.Write(buf.Bytes())
 }
 
 func GetInitialize(w http.ResponseWriter, r *http.Request) {
@@ -423,6 +530,8 @@ func main() {
 	db.SetMaxIdleConns(3)
 	db.SetMaxOpenConns(3)
 	defer db.Close()
+
+	initredis()
 
 	http.DefaultTransport.(*http.Transport).MaxIdleConnsPerHost = 100
 	http.DefaultTransport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}

@@ -10,6 +10,7 @@ import (
 	"log"
 	"math/rand"
 	"net/http"
+	_ "net/http/pprof"
 	"net/url"
 	"os"
 	"os/exec"
@@ -334,12 +335,7 @@ func GetData(w http.ResponseWriter, r *http.Request) {
 
 	data := make([]Data, 0, len(arg))
 	for service, conf := range arg {
-		row := db.QueryRow(`SELECT meth, token_type, token_key, uri FROM endpoints WHERE service=$1`, service)
-		var method string
-		var tokenType *string
-		var tokenKey *string
-		var uriTemplate *string
-		checkErr(row.Scan(&method, &tokenType, &tokenKey, &uriTemplate))
+		ep := Services[service]
 
 		headers := make(map[string]string)
 		params := conf.Params
@@ -347,13 +343,13 @@ func GetData(w http.ResponseWriter, r *http.Request) {
 			params = make(map[string]string)
 		}
 
-		if tokenType != nil && tokenKey != nil {
-			switch *tokenType {
+		if ep.TokenType != "" && ep.TokenKey != "" {
+			switch ep.TokenType {
 			case "header":
-				headers[*tokenKey] = conf.Token
+				headers[ep.TokenKey] = conf.Token
 				break
 			case "param":
-				params[*tokenKey] = conf.Token
+				params[ep.TokenKey] = conf.Token
 				break
 			}
 		}
@@ -362,9 +358,9 @@ func GetData(w http.ResponseWriter, r *http.Request) {
 		for i, s := range conf.Keys {
 			ks[i] = s
 		}
-		uri := fmt.Sprintf(*uriTemplate, ks...)
-
-		data = append(data, Data{service, fetchApi(method, uri, headers, params)})
+		uri := fmt.Sprintf(ep.Uri, ks...)
+		res := fetchApi(ep.Meth, uri, headers, params)
+		data = append(data, Data{service, res})
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -421,8 +417,8 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to connect to DB: %s.", err.Error())
 	}
-	db.SetMaxIdleConns(128)
-	db.SetMaxOpenConns(128)
+	db.SetMaxIdleConns(3)
+	db.SetMaxOpenConns(3)
 	defer db.Close()
 
 	http.DefaultTransport.(*http.Transport).MaxIdleConnsPerHost = 100
@@ -455,6 +451,9 @@ func main() {
 
 	r.HandleFunc("/", GetIndex)
 	r.PathPrefix("/").Handler(http.FileServer(http.Dir("../static")))
+
+	go http.ListenAndServe(":3000", nil) // for debug
+
 	log.Fatal(http.ListenAndServe(":8080", r))
 }
 

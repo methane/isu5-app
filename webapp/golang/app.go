@@ -71,6 +71,38 @@ type Data struct {
 	Data    map[string]interface{} `json:"data"`
 }
 
+var cacheArg map[int]*Arg
+var cacheArgMutex = &sync.RWMutex{}
+
+func getArg(id int) (Arg, error) {
+	defer cacheArgMutex.RUnlock()
+	cacheArgMutex.RLock()
+
+	if a, ok := cacheArg[id]; ok {
+		return *a, nil
+	}
+
+	var arg Arg
+	row := db.QueryRow(`SELECT arg FROM subscriptions WHERE user_id=$1`, id)
+	var argJson string
+	err := row.Scan(&argJson)
+	if err != nil {
+		return arg, err
+	}
+
+	err = json.Unmarshal([]byte(argJson), &arg)
+	if err != nil {
+		return arg, err
+	}
+	return arg, nil
+}
+
+func setArg(id int, arg *Arg) {
+	defer cacheArgMutex.Unlock()
+	cacheArgMutex.Lock()
+	cacheArg[id] = arg
+}
+
 var saltChars = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
 
 func getSession(w http.ResponseWriter, r *http.Request) int {
@@ -433,11 +465,8 @@ func GetData(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	row := db.QueryRow(`SELECT arg FROM subscriptions WHERE user_id=$1`, user.ID)
-	var argJson string
-	checkErr(row.Scan(&argJson))
-	var arg Arg
-	checkErr(json.Unmarshal([]byte(argJson), &arg))
+	arg, err := getArg(user.ID)
+	checkErr(err)
 
 	data := make([]string, len(arg))
 
@@ -541,6 +570,8 @@ func GetInitialize(w http.ResponseWriter, r *http.Request) {
 	checkErr(err)
 	_, err = exec.Command("psql", "-f", file, "isucon5f").Output()
 	checkErr(err)
+
+	cacheArg = make(map[int]*Arg, 0)
 }
 
 func main() {

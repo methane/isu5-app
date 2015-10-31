@@ -9,6 +9,7 @@ import (
 	"html/template"
 	"log"
 	"math/rand"
+	"net"
 	"net/http"
 	_ "net/http/pprof"
 	"net/url"
@@ -25,6 +26,8 @@ import (
 	"github.com/gorilla/sessions"
 	_ "github.com/lib/pq"
 )
+
+const UnixPath = "/tmp/app.sock"
 
 var (
 	db    *sql.DB
@@ -453,6 +456,15 @@ func main() {
 	r.PathPrefix("/").Handler(http.FileServer(http.Dir("../static")))
 
 	go http.ListenAndServe(":3000", nil) // for debug
+
+	os.Remove(UnixPath)
+	ul, err := net.Listen("unix", UnixPath)
+	if err != nil {
+		panic(err)
+	}
+	os.Chmod(UnixPath, 0777)
+	defer ul.Close()
+	log.Fatal(http.Serve(ul, r))
 
 	log.Fatal(http.ListenAndServe(":8080", r))
 }

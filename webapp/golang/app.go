@@ -21,6 +21,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/garyburd/redigo/redis"
@@ -376,6 +377,12 @@ func fetchName(nametype, name string) string {
 	return sraw
 }
 
+func asyncFetch(fn func() string, c chan string) {
+	go func() {
+		c <- fn()
+	}()
+}
+
 func fetchApi(method, uri string, headers, params map[string]string) string {
 	values := url.Values{}
 	for k, v := range params {
@@ -421,50 +428,64 @@ func GetData(w http.ResponseWriter, r *http.Request) {
 	checkErr(json.Unmarshal([]byte(argJson), &arg))
 
 	data := make([]string, 0, len(arg))
+
+	wg := sync.WaitGroup{}
+	wg.Add(len(arg))
+
+	i := -1
 	for service, conf := range arg {
+		i++
 		if service == "ken" {
-			res := fetchKen(conf.Keys[0])
-			data = append(data, fmt.Sprintf(`{"service": %q, "data": %s}`, service, res))
+			go func(i int) {
+				res := fetchKen(conf.Keys[0])
+				data[i] = fmt.Sprintf(`{"service": %q, "data": %s}`, service, res)
+			}(i)
 			continue
 		}
 		if service == "ken2" {
-			res := fetchKen(conf.Params["zipcode"])
-			data = append(data, fmt.Sprintf(`{"service": %q, "data": %s}`, service, res))
+			go func(i int) {
+				res := fetchKen(conf.Params["zipcode"])
+				data[i] = fmt.Sprintf(`{"service": %q, "data": %s}`, service, res)
+			}(i)
 			continue
 		}
 		if service == "surname" || service == "givenname" {
-			res := fetchName(service, conf.Params["q"])
-			data = append(data, fmt.Sprintf(`{"service": %q, "data": %s}`, service, res))
+			go func(i int) {
+				res := fetchName(service, conf.Params["q"])
+				data[i] = fmt.Sprintf(`{"service": %q, "data": %s}`, service, res)
+			}(i)
 			continue
 		}
 
-		ep := Services[service]
-		headers := make(map[string]string)
-		params := conf.Params
-		if params == nil {
-			params = make(map[string]string)
-		}
-
-		if ep.TokenType != "" && ep.TokenKey != "" {
-			switch ep.TokenType {
-			case "header":
-				headers[ep.TokenKey] = conf.Token
-				break
-			case "param":
-				params[ep.TokenKey] = conf.Token
-				break
+		go func(i int) {
+			ep := Services[service]
+			headers := make(map[string]string)
+			params := conf.Params
+			if params == nil {
+				params = make(map[string]string)
 			}
-		}
 
-		ks := make([]interface{}, len(conf.Keys))
-		for i, s := range conf.Keys {
-			ks[i] = s
-		}
-		uri := fmt.Sprintf(ep.Uri, ks...)
-		res := fetchApi(ep.Meth, uri, headers, params)
-		//data = append(data, Data{service, res})
-		data = append(data, fmt.Sprintf(`{"service": %q, "data": %s}`, service, res))
+			if ep.TokenType != "" && ep.TokenKey != "" {
+				switch ep.TokenType {
+				case "header":
+					headers[ep.TokenKey] = conf.Token
+					break
+				case "param":
+					params[ep.TokenKey] = conf.Token
+					break
+				}
+			}
+
+			ks := make([]interface{}, len(conf.Keys))
+			for i, s := range conf.Keys {
+				ks[i] = s
+			}
+			uri := fmt.Sprintf(ep.Uri, ks...)
+			res := fetchApi(ep.Meth, uri, headers, params)
+			data[i] = fmt.Sprintf(`{"service": %q, "data": %s}`, service, res)
+		}(i)
 	}
+	wg.Wait()
 
 	buf := &bytes.Buffer{}
 	buf.WriteByte('[')

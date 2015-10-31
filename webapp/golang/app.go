@@ -22,13 +22,11 @@ import (
 
 	"github.com/gorilla/context"
 	"github.com/gorilla/mux"
-	"github.com/gorilla/sessions"
 	_ "github.com/lib/pq"
 )
 
 var (
-	db    *sql.DB
-	store *sessions.CookieStore
+	db *sql.DB
 )
 
 type User struct {
@@ -421,10 +419,6 @@ func main() {
 	if dbname == "" {
 		dbname = "isucon5f"
 	}
-	ssecret := os.Getenv("ISUCON5_SESSION_SECRET")
-	if ssecret == "" {
-		ssecret = "tonymoris"
-	}
 
 	db, err = sql.Open("postgres", "host="+host+" port="+strconv.Itoa(port)+" user="+user+" dbname="+dbname+" sslmode=disable password="+password)
 	if err != nil {
@@ -435,8 +429,6 @@ func main() {
 	defer db.Close()
 
 	http.DefaultTransport.(*http.Transport).MaxIdleConnsPerHost = 100
-
-	store = sessions.NewCookieStore([]byte(ssecret))
 
 	r := mux.NewRouter()
 

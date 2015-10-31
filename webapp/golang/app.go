@@ -36,6 +36,7 @@ const UnixPath = "/tmp/app.sock"
 var (
 	db      *sql.DB
 	redisDB *redisx.ConnMux
+	tlsConc = make(chan bool, 8)
 )
 
 func initredis() {
@@ -377,13 +378,7 @@ func fetchName(nametype, name string) string {
 	return sraw
 }
 
-func asyncFetch(fn func() string, c chan string) {
-	go func() {
-		c <- fn()
-	}()
-}
-
-func fetchApi(method, uri string, headers, params map[string]string) string {
+func fetchApi(method, uri string, headers, params map[string]string, tls bool) string {
 	values := url.Values{}
 	for k, v := range params {
 		values.Add(k, v)
@@ -406,12 +401,29 @@ func fetchApi(method, uri string, headers, params map[string]string) string {
 	for k, v := range headers {
 		req.Header.Add(k, v)
 	}
-	resp, err := http.DefaultClient.Do(req)
-	checkErr(err)
 
-	raw, _ := ioutil.ReadAll(resp.Body)
-	resp.Body.Close()
-	return string(raw)
+	for {
+		if tls {
+			tlsConc <- true
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if tls {
+			<-tlsConc
+		}
+		if err != nil {
+			continue
+		}
+
+		raw, _ := ioutil.ReadAll(resp.Body)
+		resp.Body.Close()
+
+		if resp.StatusCode/100 != 2 {
+			log.Printf("failed to fetch response: %s", raw)
+			continue
+		}
+		return string(raw)
+	}
+	return ""
 }
 
 func GetData(w http.ResponseWriter, r *http.Request) {
@@ -460,7 +472,7 @@ func GetData(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		go func(i int, conf *Service, service string) {
+		fetchFun := func(i int, conf *Service, service string, tls bool) {
 			defer wg.Done()
 			ep := Services[service]
 			headers := make(map[string]string)
@@ -485,9 +497,14 @@ func GetData(w http.ResponseWriter, r *http.Request) {
 				ks[i] = s
 			}
 			uri := fmt.Sprintf(ep.Uri, ks...)
-			res := fetchApi(ep.Meth, uri, headers, params)
+			res := fetchApi(ep.Meth, uri, headers, params, tls)
 			data[i] = fmt.Sprintf(`{"service": %q, "data": %s}`, service, res)
-		}(i, conf, service)
+		}
+		if service == "tenki" {
+			go fetchFun(i, conf, service, false)
+			continue
+		}
+		fetchFun(i, conf, service, true)
 	}
 	wg.Wait()
 
